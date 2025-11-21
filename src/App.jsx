@@ -170,8 +170,140 @@ function Reports({ token, user }) {
       <div className="space-y-2">
         {reports.map(r => (
           <div key={r._id} className="p-3 rounded bg-white/10 border border-white/10">
-            <div className="text-white font-medium">{r.date} - {r.hours_worked}h</div>
+            <div className="text-white font-medium">{r.report_date || r.date} - {r.hours_worked}h</div>
             <div className="text-blue-200 text-sm">{r.summary}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BarChart({ labels, series, colors }) {
+  // series: { name: string, data: number[] }[]
+  const max = Math.max(1, ...series.flatMap(s => s.data))
+  const barWidth = Math.max(12, Math.floor(480 / Math.max(1, labels.length)))
+  return (
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-[600px]">
+        <div className="flex items-end gap-2 h-48 border-b border-white/10 pb-2">
+          {labels.map((lbl, i) => (
+            <div key={lbl} className="flex-1 flex flex-col items-center gap-1" style={{minWidth: barWidth}}>
+              <div className="w-full flex items-end gap-1">
+                {series.map((s, si) => {
+                  const val = s.data[i] || 0
+                  const h = (val / max) * 160
+                  return (
+                    <div key={s.name+si} title={`${s.name}: ${val}`} className="flex-1 rounded-t" style={{height: h, backgroundColor: colors[si] || '#60a5fa'}} />
+                  )
+                })}
+              </div>
+              <div className="text-xs text-white/70 rotate-0">{lbl}</div>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-center gap-4 text-xs text-white/80 mt-2">
+          {series.map((s, si) => (
+            <div key={s.name} className="flex items-center gap-2">
+              <span className="inline-block w-3 h-3 rounded" style={{backgroundColor: colors[si]}} />
+              <span>{s.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Finance({ token, user }) {
+  const [items, setItems] = useState([])
+  const [form, setForm] = useState({ kind:'revenue', amount:0, category:'', description:'', reference:'' })
+  const [analytics, setAnalytics] = useState(null)
+
+  const load = async () => {
+    const res = await fetch(`${API_BASE}/finance`, { headers: { Authorization: `Bearer ${token}` } })
+    setItems(await res.json())
+  }
+  const loadAnalytics = async () => {
+    const res = await fetch(`${API_BASE}/analytics/summary?months=6`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) setAnalytics(await res.json())
+  }
+  useEffect(()=>{ if(user.role==='core'){ load(); loadAnalytics(); } },[])
+
+  const create = async (e) => {
+    e.preventDefault()
+    const res = await fetch(`${API_BASE}/finance`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(form) })
+    if (res.ok) { setForm({ kind:'revenue', amount:0, category:'', description:'', reference:'' }); load(); loadAnalytics() }
+  }
+
+  if (user.role !== 'core') return null
+
+  const revenue = analytics?.finance?.revenue || []
+  const expense = analytics?.finance?.expense || []
+  const net = analytics?.finance?.net || []
+  const sal = analytics?.salary?.total || []
+  const months = analytics?.months || []
+  const totalRevenue = revenue.reduce((a,b)=>a+b,0)
+  const totalExpense = expense.reduce((a,b)=>a+b,0)
+  const totalSalary = sal.reduce((a,b)=>a+b,0)
+  const totalNet = net.reduce((a,b)=>a+b,0)
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-white font-semibold">Finance (Core only)</h3>
+      </div>
+
+      {/* Analytics Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="bg-white/10 border border-white/10 rounded-lg p-3">
+          <div className="text-xs text-blue-200">Revenue (6 mo)</div>
+          <div className="text-white text-xl font-semibold">${totalRevenue.toFixed(2)}</div>
+        </div>
+        <div className="bg-white/10 border border-white/10 rounded-lg p-3">
+          <div className="text-xs text-blue-200">Expenses (6 mo)</div>
+          <div className="text-white text-xl font-semibold">${totalExpense.toFixed(2)}</div>
+        </div>
+        <div className="bg-white/10 border border-white/10 rounded-lg p-3">
+          <div className="text-xs text-blue-200">Salary (6 mo)</div>
+          <div className="text-white text-xl font-semibold">${totalSalary.toFixed(2)}</div>
+        </div>
+        <div className="bg-white/10 border border-white/10 rounded-lg p-3">
+          <div className="text-xs text-blue-200">Net (6 mo)</div>
+          <div className="text-white text-xl font-semibold">${totalNet.toFixed(2)}</div>
+        </div>
+      </div>
+
+      {/* Charts */}
+      {analytics && (
+        <div className="space-y-6 mb-6">
+          <div>
+            <div className="text-white/90 font-medium mb-2">Revenue vs Expenses</div>
+            <BarChart labels={months} series={[{name:'Revenue', data: revenue},{name:'Expense', data: expense},{name:'Net', data: net}]} colors={["#22c55e", "#ef4444", "#60a5fa"]} />
+          </div>
+          <div>
+            <div className="text-white/90 font-medium mb-2">Salary</div>
+            <BarChart labels={months} series={[{name:'Salary', data: sal}]} colors={["#a78bfa"]} />
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-3">
+        <select className="p-2 rounded bg-white/10 border border-white/20" value={form.kind} onChange={e=>setForm({...form, kind:e.target.value})}>
+          <option value="revenue">Revenue</option>
+          <option value="expense">Expense</option>
+        </select>
+        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Amount" type="number" value={form.amount} onChange={e=>setForm({...form, amount:parseFloat(e.target.value)})} required />
+        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Category" value={form.category} onChange={e=>setForm({...form, category:e.target.value})} required />
+        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Description" value={form.description} onChange={e=>setForm({...form, description:e.target.value})} />
+        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Reference" value={form.reference} onChange={e=>setForm({...form, reference:e.target.value})} />
+        <button className="bg-green-600 hover:bg-green-500 py-2 rounded">Add</button>
+      </form>
+      <div className="space-y-2">
+        {items.map(it => (
+          <div key={it._id} className="p-3 rounded bg-white/10 border border-white/10">
+            <div className="text-white font-medium">{it.kind.toUpperCase()} - ${it.amount} • {it.category}</div>
+            <div className="text-blue-200 text-sm">{it.description} {it.reference? '• '+it.reference:''}</div>
           </div>
         ))}
       </div>
@@ -219,52 +351,6 @@ function Salary({ token, user }) {
           <div key={it._id} className="p-3 rounded bg-white/10 border border-white/10">
             <div className="text-white font-medium">{it.employee_email} - ${it.amount} ({it.month})</div>
             <div className="text-blue-200 text-sm">{it.status} {it.notes? '• '+it.notes:''}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function Finance({ token, user }) {
-  const [items, setItems] = useState([])
-  const [form, setForm] = useState({ kind:'revenue', amount:0, category:'', description:'', reference:'' })
-
-  const load = async () => {
-    const res = await fetch(`${API_BASE}/finance`, { headers: { Authorization: `Bearer ${token}` } })
-    setItems(await res.json())
-  }
-  useEffect(()=>{ if(user.role==='core') load() },[])
-
-  const create = async (e) => {
-    e.preventDefault()
-    const res = await fetch(`${API_BASE}/finance`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(form) })
-    if (res.ok) { setForm({ kind:'revenue', amount:0, category:'', description:'', reference:'' }); load() }
-  }
-
-  if (user.role !== 'core') return null
-
-  return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-white font-semibold">Finance (Core only)</h3>
-      </div>
-      <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-3">
-        <select className="p-2 rounded bg-white/10 border border-white/20" value={form.kind} onChange={e=>setForm({...form, kind:e.target.value})}>
-          <option value="revenue">Revenue</option>
-          <option value="expense">Expense</option>
-        </select>
-        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Amount" type="number" value={form.amount} onChange={e=>setForm({...form, amount:parseFloat(e.target.value)})} required />
-        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Category" value={form.category} onChange={e=>setForm({...form, category:e.target.value})} required />
-        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Description" value={form.description} onChange={e=>setForm({...form, description:e.target.value})} />
-        <input className="p-2 rounded bg-white/10 border border-white/20" placeholder="Reference" value={form.reference} onChange={e=>setForm({...form, reference:e.target.value})} />
-        <button className="bg-green-600 hover:bg-green-500 py-2 rounded">Add</button>
-      </form>
-      <div className="space-y-2">
-        {items.map(it => (
-          <div key={it._id} className="p-3 rounded bg-white/10 border border-white/10">
-            <div className="text-white font-medium">{it.kind.toUpperCase()} - ${it.amount} • {it.category}</div>
-            <div className="text-blue-200 text-sm">{it.description} {it.reference? '• '+it.reference:''}</div>
           </div>
         ))}
       </div>
